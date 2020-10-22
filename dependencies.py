@@ -2,7 +2,7 @@ import sys
 import re
 
 DST_PATTERN = re.compile(
-    r'(?:CREATE TABLE|CREATE TABLE IF NOT EXISTS|CREATE VIEW|CREATE VIEW IF NOT EXISTS|INSERT INTO|INSERT)\s+(\S+)',
+    r'(?:CREATE TABLE|CREATE TABLE IF NOT EXISTS|CREATE VIEW|CREATE VIEW IF NOT EXISTS|INSERT INTO|INSERT)\s+([^\s\(]+)',
     flags=re.I)
 SRC_PATTERN = re.compile(r'(?:FROM|JOIN)\s+([^\s\(]+)', flags=re.I)
 WITH_PATTERN_1 = re.compile(r'WITH\s+(\S+)\s+AS\s*\(', flags=re.I)
@@ -131,7 +131,7 @@ if __name__ == '__main__':
     sql_files = []
     for arg in sys.argv[1:]:
         with open(arg) as f:
-            sql_files.append(''.join(f.readlines()))
+            sql_files.append(' '.join(f.readlines()))
 
     sql_files = [remove_comment(sql) for sql in sql_files]
     sqls = multiple_queries(sql_files)
