@@ -1,8 +1,8 @@
 import sys
 import re
 
-DERIVED_PATTERN = re.compile(r' CREATE TABLE ([^\s\(]+)')
-BASE_PATTERN = re.compile(r' (?:FROM|JOIN) ([^\s\(]+)', flags=re.I)
+DERIVED_PATTERN = re.compile(r' CREATE TABLE ([^\s\(\)]+)')
+BASE_PATTERN = re.compile(r' (?:FROM|JOIN) ([^\s\(\)]+)', flags=re.I)
 WITH_PATTERN_1 = re.compile(r' WITH (\S+) AS ?\(', flags=re.I)
 WITH_PATTERN_2 = re.compile(r'\) ?, ?(\S+) AS ?\(', flags=re.I)
 
