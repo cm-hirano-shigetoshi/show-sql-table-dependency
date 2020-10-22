@@ -4,7 +4,7 @@ import re
 DST_PATTERN = re.compile(
     r'(?:CREATE TABLE|CREATE TABLE IF NOT EXISTS|CREATE VIEW|CREATE VIEW IF NOT EXISTS|INSERT INTO|INSERT)\s+([^\s\(]+)',
     flags=re.I)
-SRC_PATTERN = re.compile(r'(?:FROM|JOIN)\s+([^\s\(]+)', flags=re.I)
+SRC_PATTERN = re.compile(r'\s(?:FROM|JOIN)\s+([^\s\(]+)', flags=re.I)
 WITH_PATTERN_1 = re.compile(r'WITH\s+(\S+)\s+AS\s*\(', flags=re.I)
 WITH_PATTERN_2 = re.compile(r'^\s*,\s*(\S+)\s+AS\s*\(', flags=re.I)
 
