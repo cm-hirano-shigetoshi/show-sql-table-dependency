@@ -1,145 +1,148 @@
 import sys
 import re
 
-DST_PATTERN = re.compile(
-    r'(?:CREATE TABLE|CREATE TABLE IF NOT EXISTS|CREATE VIEW|CREATE VIEW IF NOT EXISTS|INSERT INTO|INSERT)\s+([^\s\(]+)',
+DERIVED_PATTERN = re.compile(
+    r' (?:CREATE TABLE|CREATE TABLE IF NOT EXISTS|CREATE VIEW|CREATE VIEW IF NOT EXISTS|INSERT INTO|INSERT) ([^\s\(]+)',
     flags=re.I)
-SRC_PATTERN = re.compile(r'\s(?:FROM|JOIN)\s+([^\s\(]+)', flags=re.I)
-WITH_PATTERN_1 = re.compile(r'WITH\s+(\S+)\s+AS\s*\(', flags=re.I)
-WITH_PATTERN_2 = re.compile(r'^\s*,\s*(\S+)\s+AS\s*\(', flags=re.I)
+BASE_PATTERN = re.compile(r' (?:FROM|JOIN) ([^\s\(]+)', flags=re.I)
+WITH_PATTERN_1 = re.compile(r' WITH (\S+) AS ?\(', flags=re.I)
+WITH_PATTERN_2 = re.compile(r'\) ?, ?(\S+) AS ?\(', flags=re.I)
 
 
-def multiple_queries(sql_files):
-    sqls = []
-    for sql in sql_files:
-        sqls.extend(sql.split(';'))
-    return sqls
+def get_comment_removed_line(line):
+    if '--' not in line:
+        # '--'がなければそのまま返して終わり
+        return line
+    else:
+        if "'" in line:
+            # "'"がなければ、単純に'--'以降がコメント
+            return line[:line.find('--')]
+        else:
+            # "'"があるので、'--'は文字列かもしれない
+            # あとで実装する。ひとまず'--'以降はコメントとして扱う
+            return line[:line.find('--')]
 
 
-def remove_comment(sql):
-    # 複数行のコメント削除
-    new_sql = ''
+def get_comment_removed_query(query):
+    new_query = ''
     start_pos = -1
     end_pos = 0
-    for m in re.finditer(r'(/\*|\*/)', sql):
+    for m in re.finditer(r'(/\*|\*/)', query):
         if m.group(0) == '/*' and start_pos == -1:
             start_pos = m.start()
         elif m.group(0) == '*/' and start_pos > -1:
-            new_sql += sql[end_pos:start_pos]
+            new_query += query[end_pos:start_pos]
             end_pos = m.end()
             start_pos = -1
-    new_sql += sql[end_pos:]
-
-    # 単一行コメント削除
-    lines = new_sql.split('\n')
-    for i in range(len(lines)):
-        line = lines[i]
-        # コメント部分を除外
-        p = line.find('--')
-        if p >= 0:
-            line = line[:p]
-        lines[i] = line
-    return '\n'.join(lines)
+    new_query += query[end_pos:]
+    return new_query
 
 
-def destination(sql):
-    m = re.findall(DST_PATTERN, sql)
+def format_query(query):
+    # 各単語が単一のスペースで区切られるようにする
+    q = ' ' + query + ' '
+    q = re.sub(r'\s\s+', ' ', q)
+    return q
+
+
+def get_derived_table(query):
+    m = re.findall(DERIVED_PATTERN, query)
     if len(m) == 0:
         return None
     elif len(m) != 1:
-        raise ValueError
+        raise ValueError('異常なクエリです')
     return m[0]
 
 
-def get_paren_pair_pos(text):
-    (start, end) = (-1, -1)
-    paren_count = 0
+def get_paren_pair_pos(text, start):
+    assert (text[start] == '(')
+    paren_count = 1
+    text = text[start + 1:]
     for m in re.finditer(r'[\(\)]', text):
         if m.group(0) == '(':
-            if paren_count == 0:
-                start = m.start()
             paren_count += 1
         elif m.group(0) == ')':
             paren_count -= 1
             if paren_count == 0:
                 end = m.end()
                 break
-    return (start, end)
+    return end
 
 
-def get_next_with_names(text):
-    names = []
-    match = re.search(WITH_PATTERN_1, text)
-    if match is None:
-        return ([], '')
-    names.append(match.group(1))
-    text = text[match.end() - 1:]
+def one_with(q):
+    with_tables = []
+    paren_start_pos = q.find('(')
+    paren_end_pos = get_paren_pair_pos(q, paren_start_pos)
+    q = q[paren_end_pos:]
+
+    # q = '), HOGE AS (...'
     while True:
-        _, end_paren_pos = get_paren_pair_pos(text)
-        text = text[end_paren_pos + 1:]
-        m = re.search(WITH_PATTERN_2, text)
+        # WITH_PATTERN_2 = re.compile(r'\) ?, ?(\S+) AS ?\(', flags=re.I)
+        m = re.search(WITH_PATTERN_2, q)
         if m is None:
             break
-        else:
-            names.append(m.group(1))
-            text = text[m.end() - 1:]
-    return (names, text)
+        with_tables.append(m.group(1))
+        paren_start_pos = q.find('(')
+        paren_end_pos = get_paren_pair_pos(q, paren_start_pos)
+        q = q[paren_end_pos:]
+    return with_tables
 
 
-def get_with_names(sql):
-    text = sql
-    with_names = []
-    while len(text) > 0:
-        (names, text) = get_next_with_names(text)
-        with_names.extend(names)
-    return with_names
+def get_with_tables(query):
+    with_tables = []
+    for m in re.finditer(WITH_PATTERN_1, query):
+        with_tables.append(m.group(1))
+        # q = ' WITH HOGE AS (...'
+        q = query[m.start():]
+        with_tables.extend(one_with(q))
+    return set(with_tables)
 
 
-def source(sql):
-    with_names = get_with_names(sql)
-    m = re.findall(SRC_PATTERN, sql)
-    src = set(m) - set(with_names)
-    return src
+def get_base_tables(query):
+    m = re.findall(BASE_PATTERN, query)
+    return set(m)
 
 
-def extract_dependencies(sql):
-    dst = destination(sql)
-    if dst is None:
-        return None
-    else:
-        src = source(sql)
-        return (dst, src)
+def print_line(base_tables, derived_table):
+    for base_table in base_tables:
+        print('    {} <|-- {}'.format(base_table, derived_table))
 
 
-def print_uml_str(dependencies):
-    lines = {}
-    for k, v in dependencies.items():
-        for t in v:
-            lines["{} <|-- {}".format(t, k)] = 1
-    print('''
-    @startuml
-    skinparam padding 10 /'paddingの調整'/
-    left to right direction /'diagramを左から右に伸ばして行くレイアウトにしたい場合'/
-    hide members /'classの属性を消す'/
-    hide circle /'classマークを消す'/
-    {}
-    @enduml
-    '''.format('\n    '.join(lines.keys())))
+def one_query(query):
+    # 派生テーブル名を取得
+    derived_table = get_derived_table(query)
+    if derived_table is None:
+        # 派生テーブルを作成しないクエリなら何もしないで終了
+        return
+    # WITHで作られるテーブル名setを取得
+    with_tables = get_with_tables(query)
+    # 基底テーブル名setを取得
+    base_tables = get_base_tables(query)
+    print_line(base_tables - with_tables, derived_table)
+
+
+def one_file(sql_file):
+    queries = None
+    with open(sql_file) as f:
+        lines = f.readlines()
+        # 1行コメントを削除
+        lines = [get_comment_removed_line(line) for line in lines]
+        # クエリごとの配列に作り替える
+        queries = ' '.join(lines).split(';')
+        # 複数行コメントを削除
+        queries = [get_comment_removed_query(q) for q in queries]
+        # クエリをパースしやすい形に加工
+        queries = [format_query(q) for q in queries]
+    for query in queries:
+        one_query(query)
 
 
 if __name__ == '__main__':
-    sql_files = []
-    for arg in sys.argv[1:]:
-        with open(arg) as f:
-            sql_files.append(' '.join(f.readlines()))
-
-    sql_files = [remove_comment(sql) for sql in sql_files]
-    sqls = multiple_queries(sql_files)
-
-    dependencies = {}
-    for sql in sqls:
-        d = extract_dependencies(sql)
-        if d is not None:
-            dependencies[d[0]] = d[1]
-
-    print_uml_str(dependencies)
+    print("    @startuml")
+    print("    skinparam padding 10 /'paddingの調整'/")
+    print("    left to right direction /'diagramを左から右に伸ばして行くレイアウトにしたい場合'/")
+    print("    hide members /'classの属性を消す'/")
+    print("    hide circle /'classマークを消す'/")
+    for sql_file in sys.argv[1:]:
+        one_file(sql_file)
+    print("    @enduml")
