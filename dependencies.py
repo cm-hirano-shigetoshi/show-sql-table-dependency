@@ -1,9 +1,7 @@
 import sys
 import re
 
-DERIVED_PATTERN = re.compile(
-    r' (?:CREATE TABLE|CREATE TABLE IF NOT EXISTS|CREATE VIEW|CREATE VIEW IF NOT EXISTS|INSERT INTO|INSERT) ([^\s\(]+)',
-    flags=re.I)
+DERIVED_PATTERN = re.compile(r' CREATE TABLE ([^\s\(]+)')
 BASE_PATTERN = re.compile(r' (?:FROM|JOIN) ([^\s\(]+)', flags=re.I)
 WITH_PATTERN_1 = re.compile(r' WITH (\S+) AS ?\(', flags=re.I)
 WITH_PATTERN_2 = re.compile(r'\) ?, ?(\S+) AS ?\(', flags=re.I)
@@ -42,15 +40,28 @@ def format_query(query):
     # 各単語が単一のスペースで区切られるようにする
     q = ' ' + query + ' '
     q = re.sub(r'\s\s+', ' ', q)
+
+    # IF NOT EXISTS を削除
+    q = re.sub(r' IF NOT EXISTS ', ' ', q, flags=re.I)
+
+    # CREATE TABLE/VIEW 系を統一
+    q = re.sub(r' CREATE(?:| TEMP) (?:TABLE|VIEW) ',
+               ' CREATE TABLE ',
+               q,
+               flags=re.I)
+
+    # INSERT INTO 系を統一
+    q = re.sub(r' INSERT INTO ', ' CREATE TABLE ', q, flags=re.I)
+    q = re.sub(r' INSERT ', ' CREATE TABLE ', q, flags=re.I)
+
     return q
 
 
 def get_derived_table(query):
     m = re.findall(DERIVED_PATTERN, query)
+    assert (len(m) < 2)
     if len(m) == 0:
         return None
-    elif len(m) != 1:
-        raise ValueError('異常なクエリです')
     return m[0]
 
 
@@ -138,11 +149,11 @@ def one_file(sql_file):
 
 
 if __name__ == '__main__':
-    print("    @startuml")
+    print("@startuml")
     print("    skinparam padding 10 /'paddingの調整'/")
     print("    left to right direction /'diagramを左から右に伸ばして行くレイアウトにしたい場合'/")
     print("    hide members /'classの属性を消す'/")
     print("    hide circle /'classマークを消す'/")
     for sql_file in sys.argv[1:]:
         one_file(sql_file)
-    print("    @enduml")
+    print("@enduml")
